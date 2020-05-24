@@ -1,0 +1,8 @@
+[Unit]
+Description=DDC daemon
+Requires=ddcd.socket
+
+[Service]
+User=ddcd
+Group=nobody
+ExecStart=/usr/bin/ddcd

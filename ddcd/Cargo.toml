@@ -1,0 +1,13 @@
+[package]
+name = "ddcd"
+version = "0.1.0"
+authors = ["Michael Zimmermann <sigmaepsilon92@gmail.com>"]
+edition = "2018"
+
+[lib]
+
+[dependencies]
+ddcutil = { path="../ddcutil" }
+tokio = { version="0.2", features=["uds", "stream", "macros", "io-util"] }
+listenfd = "0.3"
+error-rules = "1.0"

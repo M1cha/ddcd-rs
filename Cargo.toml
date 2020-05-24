@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "ddcutil-sys",
+    "ddcutil",
+    "ddcd",
+]
