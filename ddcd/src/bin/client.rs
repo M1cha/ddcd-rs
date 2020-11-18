@@ -17,7 +17,7 @@ async fn main() {
             let input = u16::from_str_radix(&args[2], 16).unwrap();
             stream.write_u8(INPUT_SOURCE).await.unwrap();
             stream.write_u16(input).await.unwrap();
-        },
+        }
         _ => panic!("unsupported command: {}", cmd),
     }
 }

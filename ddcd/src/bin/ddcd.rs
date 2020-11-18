@@ -17,16 +17,13 @@ struct Context {
     dh: ddcutil::DisplayHandle,
 }
 
-async fn handle_client(
-    mut stream: tokio::net::UnixStream,
-    ctx: &mut Context,
-) -> Result<(), Error> {
+async fn handle_client(mut stream: tokio::net::UnixStream, ctx: &mut Context) -> Result<(), Error> {
     let cmd = stream.read_u8().await?;
     match cmd {
         BRIGHTNESS_UP => {
             ctx.brightness = ctx.max_brightness.min(ctx.brightness + 5);
             ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
-        },
+        }
         BRIGHTNESS_DOWN => {
             if ctx.brightness >= 5 {
                 ctx.brightness -= 5;
@@ -34,11 +31,11 @@ async fn handle_client(
                 ctx.brightness = 0;
             }
             ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
-        },
+        }
         INPUT_SOURCE => {
             let val = stream.read_u16().await?;
             ctx.dh.set_non_table_vcp_value(0x60, val)?;
-        },
+        }
         _ => eprintln!("invalid command: {}", cmd),
     }
 
@@ -63,17 +60,15 @@ async fn main() {
     let mut ctx = Context {
         max_brightness,
         brightness,
-        dh
+        dh,
     };
 
     while let Some(stream) = listener.next().await {
         match stream {
-            Ok(stream) => {
-                match handle_client(stream, &mut ctx).await {
-                    Ok(_) => (),
-                    Err(e) => eprintln!("handle_client: {}", e),
-                }
-            }
+            Ok(stream) => match handle_client(stream, &mut ctx).await {
+                Ok(_) => (),
+                Err(e) => eprintln!("handle_client: {}", e),
+            },
             Err(e) => {
                 eprintln!("listener error: {}", e);
             }
