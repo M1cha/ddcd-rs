@@ -47,6 +47,8 @@ async fn handle_client(
 
 #[tokio::main]
 async fn main() {
+    let dispno: usize = std::env::var("DDCD_DISPNO").unwrap().parse().unwrap();
+
     let mut listenfd = listenfd::ListenFd::from_env();
     let listener = listenfd
         .take_unix_listener(0)
@@ -54,7 +56,7 @@ async fn main() {
         .expect("can't get unix listener");
     let mut listener = tokio::net::UnixListener::from_std(listener).unwrap();
 
-    let did = ddcutil::DisplayIdentifier::from_dispno(1).expect("can't get display id");
+    let did = ddcutil::DisplayIdentifier::from_dispno(dispno).expect("can't get display id");
     let dref = did.get_display_ref().expect("can't get display ref");
     let mut dh = dref.open_display2(true).expect("can't open display");
     let (max_brightness, brightness) = dh.non_table_vcp_value(0x10).expect("can't get brightness");

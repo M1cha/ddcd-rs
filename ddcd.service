@@ -8,4 +8,5 @@ Requires=ddcd.socket
 [Service]
 User=ddcd
 Group=nobody
+EnvironmentFile=/etc/ddcd.conf
 ExecStart=/usr/bin/ddcd
