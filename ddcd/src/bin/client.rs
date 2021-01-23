@@ -1,7 +1,7 @@
 use ddcd::*;
 use tokio::io::AsyncWriteExt;
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = &args[1];

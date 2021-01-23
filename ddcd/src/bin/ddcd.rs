@@ -1,6 +1,5 @@
 use ddcd::*;
 use tokio::io::AsyncReadExt;
-use tokio::stream::StreamExt;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -41,7 +40,7 @@ async fn handle_client(mut stream: tokio::net::UnixStream, ctx: &mut Context) ->
     Ok(())
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "current_thread")]
 async fn main() {
     let dispno: usize = std::env::var("DDCD_DISPNO").unwrap().parse().unwrap();
 
@@ -50,7 +49,7 @@ async fn main() {
         .take_unix_listener(0)
         .expect("invalid fd type")
         .expect("can't get unix listener");
-    let mut listener = tokio::net::UnixListener::from_std(listener).unwrap();
+    let listener = tokio::net::UnixListener::from_std(listener).unwrap();
 
     let did = ddcutil::DisplayIdentifier::from_dispno(dispno).expect("can't get display id");
     let dref = did.get_display_ref().expect("can't get display ref");
@@ -62,15 +61,14 @@ async fn main() {
         dh,
     };
 
-    while let Some(stream) = listener.next().await {
-        match stream {
-            Ok(stream) => match handle_client(stream, &mut ctx).await {
-                Ok(_) => (),
-                Err(e) => eprintln!("handle_client: {}", e),
-            },
-            Err(e) => {
-                eprintln!("listener error: {}", e);
+    loop {
+        match listener.accept().await {
+            Ok((stream, _addr)) => {
+                if let Err(e) = handle_client(stream, &mut ctx).await {
+                    eprintln!("handle_client: {}", e)
+                }
             }
+            Err(e) => eprintln!("listener error: {}", e),
         }
     }
 }
