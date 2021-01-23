@@ -1,32 +1,21 @@
+use clap::Clap;
 use ddcd::*;
-use std::convert::TryInto;
-use tokio::io::AsyncWriteExt;
+use futures::prelude::sink::SinkExt;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let model = &args[1];
-    let cmd = &args[2];
+    let payload = SocketPayload::parse();
 
-    let mut stream = tokio::net::UnixStream::connect("/run/ddcd/socket")
+    let stream = tokio::net::UnixStream::connect("/run/ddcd/socket")
         .await
         .unwrap();
 
-    stream
-        .write_u8(model.len().try_into().unwrap())
-        .await
-        .unwrap();
+    let frames =
+        tokio_util::codec::FramedWrite::new(stream, tokio_util::codec::LengthDelimitedCodec::new());
+    let mut payloads = tokio_serde::SymmetricallyFramed::new(
+        frames,
+        tokio_serde::formats::SymmetricalBincode::default(),
+    );
 
-    stream.write_all(model.as_bytes()).await.unwrap();
-
-    match cmd.as_str() {
-        "bl-up" => stream.write_u8(BRIGHTNESS_UP).await.unwrap(),
-        "bl-down" => stream.write_u8(BRIGHTNESS_DOWN).await.unwrap(),
-        "set-input" => {
-            let input = u16::from_str_radix(&args[2], 16).unwrap();
-            stream.write_u8(INPUT_SOURCE).await.unwrap();
-            stream.write_u16(input).await.unwrap();
-        }
-        _ => panic!("unsupported command: {}", cmd),
-    }
+    payloads.send(payload).await.unwrap();
 }

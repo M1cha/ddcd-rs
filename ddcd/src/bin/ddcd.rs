@@ -1,6 +1,5 @@
 use ddcd::*;
-use std::convert::TryInto;
-use tokio::io::AsyncReadExt;
+use futures::stream::TryStreamExt;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -17,6 +16,7 @@ enum Error {
     DisplayNotFound,
 }
 
+//#[derive(Copy)]
 struct Context<'a> {
     max_brightness: u16,
     brightness: u16,
@@ -24,27 +24,13 @@ struct Context<'a> {
     dh: ddcutil::DisplayHandle,
 }
 
-async fn handle_client(
-    mut stream: tokio::net::UnixStream,
-    displays: &mut [Context<'_>],
-) -> Result<(), Error> {
-    let model_len = stream.read_u8().await?.try_into()?;
-    let mut model = vec![0; model_len];
-    stream.read_exact(&mut model).await?;
-    let model = std::str::from_utf8(&model)?;
-
-    let ctx = displays
-        .iter_mut()
-        .find(|d| d.di.model() == model)
-        .ok_or(Error::DisplayNotFound)?;
-
-    let cmd = stream.read_u8().await?;
+async fn handle_client_cmd(ctx: &mut Context<'_>, cmd: &Command) -> Result<(), Error> {
     match cmd {
-        BRIGHTNESS_UP => {
+        Command::BrightnessUp => {
             ctx.brightness = ctx.max_brightness.min(ctx.brightness + 5);
             ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
         }
-        BRIGHTNESS_DOWN => {
+        Command::BrightnessDown => {
             if ctx.brightness >= 5 {
                 ctx.brightness -= 5;
             } else {
@@ -52,11 +38,37 @@ async fn handle_client(
             }
             ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
         }
-        INPUT_SOURCE => {
-            let val = stream.read_u16().await?;
-            ctx.dh.set_non_table_vcp_value(0x60, val)?;
+        Command::InputSource { id } => {
+            ctx.dh.set_non_table_vcp_value(0x60, *id)?;
         }
-        _ => eprintln!("invalid command: {}", cmd),
+    }
+
+    Ok(())
+}
+
+async fn handle_client(
+    stream: tokio::net::UnixStream,
+    displays: &mut [Context<'_>],
+) -> Result<(), Error> {
+    let frames =
+        tokio_util::codec::FramedRead::new(stream, tokio_util::codec::LengthDelimitedCodec::new());
+    let mut payloads = tokio_serde::SymmetricallyFramed::new(
+        frames,
+        tokio_serde::formats::SymmetricalBincode::<SocketPayload>::default(),
+    );
+
+    while let Some(payload) = payloads.try_next().await? {
+        if let Some(model) = payload.model {
+            let ctx = displays
+                .iter_mut()
+                .find(|d| d.di.model() == model)
+                .ok_or(Error::DisplayNotFound)?;
+            handle_client_cmd(ctx, &payload.cmd).await?;
+        } else {
+            for display in displays.iter_mut() {
+                handle_client_cmd(display, &payload.cmd).await?;
+            }
+        }
     }
 
     Ok(())
