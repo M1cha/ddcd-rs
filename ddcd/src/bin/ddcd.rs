@@ -1,4 +1,5 @@
 use ddcd::*;
+use std::convert::TryInto;
 use tokio::io::AsyncReadExt;
 
 #[derive(Debug, thiserror::Error)]
@@ -7,15 +8,36 @@ enum Error {
     DDCUtil(#[from] ddcutil::Error),
     #[error(transparent)]
     Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Infallible(#[from] std::convert::Infallible),
+    #[error(transparent)]
+    Utf8(#[from] std::str::Utf8Error),
+
+    #[error("display not found")]
+    DisplayNotFound,
 }
 
-struct Context {
+struct Context<'a> {
     max_brightness: u16,
     brightness: u16,
+    di: ddcutil::DisplayInfo<'a>,
     dh: ddcutil::DisplayHandle,
 }
 
-async fn handle_client(mut stream: tokio::net::UnixStream, ctx: &mut Context) -> Result<(), Error> {
+async fn handle_client(
+    mut stream: tokio::net::UnixStream,
+    displays: &mut [Context<'_>],
+) -> Result<(), Error> {
+    let model_len = stream.read_u8().await?.try_into()?;
+    let mut model = vec![0; model_len];
+    stream.read_exact(&mut model).await?;
+    let model = std::str::from_utf8(&model)?;
+
+    let ctx = displays
+        .iter_mut()
+        .find(|d| d.di.model() == model)
+        .ok_or(Error::DisplayNotFound)?;
+
     let cmd = stream.read_u8().await?;
     match cmd {
         BRIGHTNESS_UP => {
@@ -42,8 +64,6 @@ async fn handle_client(mut stream: tokio::net::UnixStream, ctx: &mut Context) ->
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let dispno: usize = std::env::var("DDCD_DISPNO").unwrap().parse().unwrap();
-
     let mut listenfd = listenfd::ListenFd::from_env();
     let listener = listenfd
         .take_unix_listener(0)
@@ -51,20 +71,40 @@ async fn main() {
         .expect("can't get unix listener");
     let listener = tokio::net::UnixListener::from_std(listener).unwrap();
 
-    let did = ddcutil::DisplayIdentifier::from_dispno(dispno).expect("can't get display id");
-    let dref = did.get_display_ref().expect("can't get display ref");
-    let mut dh = dref.open_display2(true).expect("can't open display");
-    let (max_brightness, brightness) = dh.non_table_vcp_value(0x10).expect("can't get brightness");
-    let mut ctx = Context {
-        max_brightness,
-        brightness,
-        dh,
-    };
+    let dil = ddcutil::DisplayInfoList::new(false).expect("can't get display info list");
+    let mut displays = Vec::with_capacity(dil.len());
+
+    for di in dil.iter() {
+        let dref = di.display_ref();
+        let mut dh = match dref.open_display2(true) {
+            Err(e) => {
+                eprintln!("can't get display {}: {}", di.dispno(), e);
+                continue;
+            }
+            Ok(dh) => dh,
+        };
+
+        let (max_brightness, brightness) = match dh.non_table_vcp_value(0x10) {
+            Err(e) => {
+                eprintln!("can't get brightness of display {}: {}", di.dispno(), e);
+                continue;
+            }
+            Ok(r) => r,
+        };
+
+        eprintln!("add display dispno={} model={}", di.dispno(), di.model());
+        displays.push(Context {
+            max_brightness,
+            brightness,
+            di,
+            dh,
+        });
+    }
 
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
-                if let Err(e) = handle_client(stream, &mut ctx).await {
+                if let Err(e) = handle_client(stream, &mut displays).await {
                     eprintln!("handle_client: {}", e)
                 }
             }
