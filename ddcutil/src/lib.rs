@@ -1,15 +1,14 @@
-use error_rules::*;
 use std::convert::TryInto;
 
 use ddcutil_sys::DDCA_Non_Table_Vcp_Value as VcpValue;
 pub const DDCRC_OK: ddcutil_sys::DDCA_Status = ddcutil_sys::DDCRC_OK as ddcutil_sys::DDCA_Status;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error_kind("DDCA_Status:{}", 0)]
+    #[error("DDCA_Status:{0}")]
     Sys(ddcutil_sys::DDCA_Status),
-    #[error_from]
-    TryFromIntError(std::num::TryFromIntError),
+    #[error(transparent)]
+    TryFromIntError(#[from] std::num::TryFromIntError),
 }
 
 pub struct DisplayIdentifier {

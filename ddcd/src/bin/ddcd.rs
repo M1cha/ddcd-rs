@@ -1,14 +1,13 @@
 use ddcd::*;
-use error_rules::*;
 use tokio::io::AsyncReadExt;
 use tokio::stream::StreamExt;
 
-#[derive(Debug, Error)]
+#[derive(Debug, thiserror::Error)]
 enum Error {
-    #[error_from]
-    DDCUtil(ddcutil::Error),
-    #[error_from]
-    Io(std::io::Error),
+    #[error(transparent)]
+    DDCUtil(#[from] ddcutil::Error),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
 }
 
 struct Context {

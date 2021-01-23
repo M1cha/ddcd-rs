@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies]
 ddcutil-sys = { path="../ddcutil-sys" }
-error-rules = "1.0"
+thiserror = "^1.0"

@@ -10,4 +10,4 @@ edition = "2018"
 ddcutil = { path="../ddcutil" }
 tokio = { version="0.2", features=["uds", "stream", "macros", "io-util"] }
 listenfd = "0.3"
-error-rules = "1.0"
+thiserror = "^1.0"
