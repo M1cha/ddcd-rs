@@ -16,30 +16,68 @@ enum Error {
     DisplayNotFound,
 }
 
-//#[derive(Copy)]
-struct Context<'a> {
+struct Display<'a> {
     max_brightness: u16,
-    brightness: u16,
     di: ddcutil::DisplayInfo<'a>,
     dh: ddcutil::DisplayHandle,
+    max_luminance: usize,
 }
 
-async fn handle_client_cmd(ctx: &mut Context<'_>, cmd: &Command) -> Result<(), Error> {
+impl<'a> Display<'a> {
+    pub fn set_brightness(&mut self, brightness: u16) -> Result<(), Error> {
+        eprintln!(
+            "update display dispno={} model={} _brightness={}",
+            self.di.dispno(),
+            self.di.model(),
+            brightness
+        );
+
+        self.dh
+            .set_non_table_vcp_value(0x10, self.max_brightness.min(brightness))?;
+        Ok(())
+    }
+
+    pub fn set_luminance(&mut self, luminance: u16) -> Result<(), Error> {
+        self.set_brightness(
+            ((self.max_brightness as f64) / (self.max_luminance as f64) * (luminance as f64))
+                .round() as u16,
+        )?;
+        Ok(())
+    }
+}
+
+struct Context {
+    luminance: u16,
+}
+
+async fn handle_client_cmd(
+    ctx: &mut Context,
+    displays: &mut [Display<'_>],
+    cmd: &Command,
+) -> Result<(), Error> {
     match cmd {
         Command::BrightnessUp => {
-            ctx.brightness = ctx.max_brightness.min(ctx.brightness + 5);
-            ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
+            ctx.luminance += 5;
+
+            for display in displays {
+                display.set_luminance(ctx.luminance)?;
+            }
         }
         Command::BrightnessDown => {
-            if ctx.brightness >= 5 {
-                ctx.brightness -= 5;
+            if ctx.luminance >= 5 {
+                ctx.luminance -= 5;
             } else {
-                ctx.brightness = 0;
+                ctx.luminance = 0;
             }
-            ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
+
+            for display in displays {
+                display.set_luminance(ctx.luminance)?;
+            }
         }
         Command::InputSource { id } => {
-            ctx.dh.set_non_table_vcp_value(0x60, *id)?;
+            for display in displays {
+                display.dh.set_non_table_vcp_value(0x60, *id)?;
+            }
         }
     }
 
@@ -47,8 +85,9 @@ async fn handle_client_cmd(ctx: &mut Context<'_>, cmd: &Command) -> Result<(), E
 }
 
 async fn handle_client(
+    ctx: &mut Context,
     stream: tokio::net::UnixStream,
-    displays: &mut [Context<'_>],
+    displays: &mut [Display<'_>],
 ) -> Result<(), Error> {
     let frames =
         tokio_util::codec::FramedRead::new(stream, tokio_util::codec::LengthDelimitedCodec::new());
@@ -59,15 +98,13 @@ async fn handle_client(
 
     while let Some(payload) = payloads.try_next().await? {
         if let Some(model) = payload.model {
-            let ctx = displays
-                .iter_mut()
-                .find(|d| d.di.model() == model)
+            let i = displays
+                .iter()
+                .position(|d| d.di.model() == model)
                 .ok_or(Error::DisplayNotFound)?;
-            handle_client_cmd(ctx, &payload.cmd).await?;
+            handle_client_cmd(ctx, &mut displays[i..i + 1], &payload.cmd).await?;
         } else {
-            for display in displays.iter_mut() {
-                handle_client_cmd(display, &payload.cmd).await?;
-            }
+            handle_client_cmd(ctx, displays, &payload.cmd).await?;
         }
     }
 
@@ -96,7 +133,7 @@ async fn main() {
             Ok(dh) => dh,
         };
 
-        let (max_brightness, brightness) = match dh.non_table_vcp_value(0x10) {
+        let (max_brightness, _brightness) = match dh.non_table_vcp_value(0x10) {
             Err(e) => {
                 eprintln!("can't get brightness of display {}: {}", di.dispno(), e);
                 continue;
@@ -104,19 +141,31 @@ async fn main() {
             Ok(r) => r,
         };
 
-        eprintln!("add display dispno={} model={}", di.dispno(), di.model());
-        displays.push(Context {
+        let max_luminance = match di.model() {
+            "DELL P3221D" => 350,
+            "DELL P2417H" => 250,
+            model => panic!("unsupported model: {}", model),
+        };
+
+        eprintln!(
+            "add display dispno={} model={} max_brightness={}",
+            di.dispno(),
+            di.model(),
+            max_brightness
+        );
+        displays.push(Display {
             max_brightness,
-            brightness,
             di,
             dh,
+            max_luminance,
         });
     }
 
+    let mut ctx = Context { luminance: 0 };
     loop {
         match listener.accept().await {
             Ok((stream, _addr)) => {
-                if let Err(e) = handle_client(stream, &mut displays).await {
+                if let Err(e) = handle_client(&mut ctx, stream, &mut displays).await {
                     eprintln!("handle_client: {}", e)
                 }
             }
