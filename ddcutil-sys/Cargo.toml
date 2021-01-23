@@ -5,4 +5,4 @@ authors = ["Michael Zimmermann <sigmaepsilon92@gmail.com>"]
 edition = "2018"
 
 [build-dependencies]
-bindgen = "0.54"
+bindgen = "^0.56"
