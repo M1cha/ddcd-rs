@@ -59,13 +59,17 @@ impl DisplayIdentifier {
             Err(Error::Sys(status))
         } else {
             assert!(!dref.is_null());
-            Ok(DisplayRef { native: dref })
+            Ok(DisplayRef {
+                native: dref,
+                owned: true,
+            })
         }
     }
 }
 
 pub struct DisplayRef {
     native: ddcutil_sys::DDCA_Display_Ref,
+    owned: bool,
 }
 
 impl DisplayRef {
@@ -83,6 +87,10 @@ impl DisplayRef {
 
 impl Drop for DisplayRef {
     fn drop(&mut self) {
+        if !self.owned {
+            return;
+        }
+
         let status = unsafe { ddcutil_sys::ddca_free_display_ref(self.native) };
         if status != DDCRC_OK {
             panic!("ddca_free_display_ref failed: {}", status);
@@ -163,6 +171,99 @@ impl std::fmt::Display for DisplayHandle {
         match unsafe { std::ffi::CStr::from_ptr(s) }.to_str() {
             Ok(s) => write!(f, "{}", s),
             Err(_) => Err(std::fmt::Error),
+        }
+    }
+}
+
+pub struct DisplayInfoList {
+    native: *mut ddcutil_sys::DDCA_Display_Info_List,
+}
+
+impl Drop for DisplayInfoList {
+    fn drop(&mut self) {
+        unsafe { ddcutil_sys::ddca_free_display_info_list(self.native) };
+    }
+}
+
+impl DisplayInfoList {
+    pub fn new(include_invalid_displays: bool) -> Result<Self, Error> {
+        let mut dil = std::ptr::null_mut();
+        let status =
+            unsafe { ddcutil_sys::ddca_get_display_info_list2(include_invalid_displays, &mut dil) };
+        if status != DDCRC_OK {
+            Err(Error::Sys(status))
+        } else {
+            assert!(!dil.is_null());
+            Ok(Self { native: dil })
+        }
+    }
+
+    pub fn iter(&self) -> DislayInfoListIter {
+        DislayInfoListIter { list: self, pos: 0 }
+    }
+
+    pub fn len(&self) -> usize {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        native.ct.try_into().unwrap()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        native.ct == 0
+    }
+}
+
+pub struct DislayInfoListIter<'a> {
+    list: &'a DisplayInfoList,
+    pos: usize,
+}
+
+impl<'a> Iterator for DislayInfoListIter<'a> {
+    type Item = DisplayInfo<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let native = unsafe { self.list.native.as_ref() }.unwrap();
+
+        if self.pos < self.list.len() {
+            let di = DisplayInfo {
+                native: unsafe { native.info.as_ptr().add(self.pos) },
+                pd: std::marker::PhantomData,
+            };
+
+            self.pos += 1;
+
+            Some(di)
+        } else {
+            None
+        }
+    }
+}
+
+pub struct DisplayInfo<'a> {
+    native: *const ddcutil_sys::DDCA_Display_Info,
+    pd: std::marker::PhantomData<&'a DisplayInfoList>,
+}
+
+impl<'a> DisplayInfo<'a> {
+    pub fn display_ref(&self) -> DisplayRef {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        DisplayRef {
+            native: native.dref,
+            owned: false,
+        }
+    }
+
+    pub fn dispno(&self) -> usize {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        native.dispno.try_into().unwrap()
+    }
+
+    pub fn model(&self) -> &str {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        unsafe {
+            std::ffi::CStr::from_ptr(native.model_name.as_ptr())
+                .to_str()
+                .unwrap()
         }
     }
 }
