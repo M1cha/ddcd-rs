@@ -1,5 +1,12 @@
 use ddcd::*;
 use futures::stream::TryStreamExt;
+use std::convert::TryInto as _;
+
+const VCP_INPUT: u8 = 0x60;
+const VCP_BRIGHTNESS: u8 = 0x10;
+const VCP_GAIN_RED: u8 = 0x16;
+const VCP_GAIN_GREEN: u8 = 0x18;
+const VCP_GAIN_BLUE: u8 = 0x1A;
 
 #[derive(Debug, thiserror::Error)]
 enum Error {
@@ -10,56 +17,122 @@ enum Error {
     #[error(transparent)]
     Infallible(#[from] std::convert::Infallible),
     #[error(transparent)]
+    TryFromIntError(#[from] std::num::TryFromIntError),
+    #[error(transparent)]
     Utf8(#[from] std::str::Utf8Error),
 
     #[error("display not found")]
     DisplayNotFound,
 }
 
+struct Calibration {
+    red: u16,
+    green: u16,
+    blue: u16,
+    max: u16,
+}
+
+struct VcpValue {
+    id: u8,
+    current: u16,
+    max: u16,
+}
+
+impl VcpValue {
+    pub fn from_display(dh: &mut ddcutil::DisplayHandle, id: u8) -> Result<Self, Error> {
+        let (max, current) = dh.non_table_vcp_value(id)?;
+        Ok(Self { id, current, max })
+    }
+
+    pub fn set(&mut self, dh: &mut ddcutil::DisplayHandle, value: u16) -> Result<(), Error> {
+        if self.current != value {
+            dh.set_non_table_vcp_value(self.id, value)?;
+            self.current = value;
+        }
+
+        Ok(())
+    }
+}
+
 struct Display<'a> {
-    max_brightness: u16,
-    brightness: u16,
     di: ddcutil::DisplayInfo<'a>,
     dh: ddcutil::DisplayHandle,
+
+    calibration: Calibration,
+
+    brightness: VcpValue,
+    gain_red: VcpValue,
+    gain_green: VcpValue,
+    gain_blue: VcpValue,
+
+    /// a value between -100 and +100 in %
+    ///
+    /// A positive number denotes the backlight strength percentage.
+    /// A negative number denotes the software brightness decrease.
+    luminance: i8,
 }
 
 impl<'a> Display<'a> {
-    pub fn set_brightness(&mut self, brightness: u16) -> Result<(), Error> {
-        eprintln!(
-            "update display dispno={} model={} _brightness={}",
-            self.di.dispno(),
-            self.di.model(),
-            brightness
-        );
-
-        self.dh.set_non_table_vcp_value(0x10, brightness)?;
-        self.brightness = brightness;
-        Ok(())
-    }
-
-    pub fn increase_brightness(&mut self) -> Result<(), Error> {
-        self.set_brightness(self.max_brightness.min(self.brightness + 5))
-    }
-
-    pub fn decrease_brightness(&mut self) -> Result<(), Error> {
-        let new_brightness = if self.brightness >= 5 {
-            self.brightness - 5
-        } else {
-            0
-        };
-        self.set_brightness(new_brightness)
-    }
-
     pub fn set_input(&mut self, id: u16) -> Result<(), Error> {
-        self.dh.set_non_table_vcp_value(0x60, id)?;
+        self.dh.set_non_table_vcp_value(VCP_INPUT, id)?;
         Ok(())
+    }
+
+    pub fn set_luminance(&mut self, new_luminance: i8) -> Result<(), Error> {
+        eprintln!("set luminance to {}", new_luminance);
+
+        if new_luminance >= 0 {
+            let new_luminance: u16 = new_luminance.try_into()?;
+
+            self.gain_red.set(&mut self.dh, self.gain_red.max)?;
+            self.gain_green.set(&mut self.dh, self.gain_green.max)?;
+            self.gain_blue.set(&mut self.dh, self.gain_blue.max)?;
+
+            let new_brightness =
+                (self.brightness.max as f32 * new_luminance as f32 / 100.0).round() as u16;
+
+            self.brightness.set(&mut self.dh, new_brightness)?;
+        } else {
+            let new_luminance: f32 = (100 - new_luminance.abs()).try_into()?;
+
+            let new_gain_red_internal = self.calibration.red as f32 * new_luminance / 100.0;
+            let new_gain_green_internal = self.calibration.green as f32 * new_luminance / 100.0;
+            let new_gain_blue_internal = self.calibration.blue as f32 * new_luminance / 100.0;
+
+            let new_gain_red = (self.gain_red.max as f32 * new_gain_red_internal
+                / self.calibration.max as f32)
+                .round() as u16;
+            let new_gain_green = (self.gain_green.max as f32 * new_gain_green_internal
+                / self.calibration.max as f32)
+                .round() as u16;
+            let new_gain_blue = (self.gain_blue.max as f32 * new_gain_blue_internal
+                / self.calibration.max as f32)
+                .round() as u16;
+
+            self.brightness.set(&mut self.dh, 0)?;
+            self.gain_red.set(&mut self.dh, new_gain_red)?;
+            self.gain_green.set(&mut self.dh, new_gain_green)?;
+            self.gain_blue.set(&mut self.dh, new_gain_blue)?;
+        }
+
+        self.luminance = new_luminance;
+
+        Ok(())
+    }
+
+    pub fn increase_luminance(&mut self) -> Result<(), Error> {
+        self.set_luminance((self.luminance + 5).min(100))
+    }
+
+    pub fn decrease_luminance(&mut self) -> Result<(), Error> {
+        self.set_luminance((self.luminance - 5).max(-100))
     }
 }
 
 async fn handle_client_cmd(display: &mut Display<'_>, cmd: &Command) -> Result<(), Error> {
     match cmd {
-        Command::BrightnessUp => display.increase_brightness()?,
-        Command::BrightnessDown => display.decrease_brightness()?,
+        Command::BrightnessUp => display.increase_luminance()?,
+        Command::BrightnessDown => display.decrease_luminance()?,
         Command::InputSource { id } => display.set_input(*id)?,
     }
 
@@ -116,20 +189,29 @@ async fn main() {
             Ok(dh) => dh,
         };
 
-        let (max_brightness, brightness) = match dh.non_table_vcp_value(0x10) {
-            Err(e) => {
-                eprintln!("can't get brightness of display {}: {}", di.dispno(), e);
-                continue;
-            }
-            Ok(r) => r,
+        let calibration = match di.model() {
+            "DELL P3221D" => Calibration {
+                red: 215,
+                green: 219,
+                blue: 210,
+                max: 219,
+            },
+            model => panic!("unsupported model: {}", model),
         };
 
         eprintln!("add display dispno={} model={}", di.dispno(), di.model());
         displays.push(Display {
-            max_brightness,
-            brightness,
+            brightness: VcpValue::from_display(&mut dh, VCP_BRIGHTNESS).unwrap(),
+            gain_red: VcpValue::from_display(&mut dh, VCP_GAIN_RED).unwrap(),
+            gain_green: VcpValue::from_display(&mut dh, VCP_GAIN_GREEN).unwrap(),
+            gain_blue: VcpValue::from_display(&mut dh, VCP_GAIN_BLUE).unwrap(),
+
             di,
             dh,
+
+            calibration,
+
+            luminance: 0,
         });
     }
 
