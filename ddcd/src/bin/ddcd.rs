@@ -16,31 +16,51 @@ enum Error {
     DisplayNotFound,
 }
 
-//#[derive(Copy)]
-struct Context<'a> {
+struct Display<'a> {
     max_brightness: u16,
     brightness: u16,
     di: ddcutil::DisplayInfo<'a>,
     dh: ddcutil::DisplayHandle,
 }
 
-async fn handle_client_cmd(ctx: &mut Context<'_>, cmd: &Command) -> Result<(), Error> {
+impl<'a> Display<'a> {
+    pub fn set_brightness(&mut self, brightness: u16) -> Result<(), Error> {
+        eprintln!(
+            "update display dispno={} model={} _brightness={}",
+            self.di.dispno(),
+            self.di.model(),
+            brightness
+        );
+
+        self.dh.set_non_table_vcp_value(0x10, brightness)?;
+        self.brightness = brightness;
+        Ok(())
+    }
+
+    pub fn increase_brightness(&mut self) -> Result<(), Error> {
+        self.set_brightness(self.max_brightness.min(self.brightness + 5))
+    }
+
+    pub fn decrease_brightness(&mut self) -> Result<(), Error> {
+        let new_brightness = if self.brightness >= 5 {
+            self.brightness - 5
+        } else {
+            0
+        };
+        self.set_brightness(new_brightness)
+    }
+
+    pub fn set_input(&mut self, id: u16) -> Result<(), Error> {
+        self.dh.set_non_table_vcp_value(0x60, id)?;
+        Ok(())
+    }
+}
+
+async fn handle_client_cmd(display: &mut Display<'_>, cmd: &Command) -> Result<(), Error> {
     match cmd {
-        Command::BrightnessUp => {
-            ctx.brightness = ctx.max_brightness.min(ctx.brightness + 5);
-            ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
-        }
-        Command::BrightnessDown => {
-            if ctx.brightness >= 5 {
-                ctx.brightness -= 5;
-            } else {
-                ctx.brightness = 0;
-            }
-            ctx.dh.set_non_table_vcp_value(0x10, ctx.brightness)?;
-        }
-        Command::InputSource { id } => {
-            ctx.dh.set_non_table_vcp_value(0x60, *id)?;
-        }
+        Command::BrightnessUp => display.increase_brightness()?,
+        Command::BrightnessDown => display.decrease_brightness()?,
+        Command::InputSource { id } => display.set_input(*id)?,
     }
 
     Ok(())
@@ -48,7 +68,7 @@ async fn handle_client_cmd(ctx: &mut Context<'_>, cmd: &Command) -> Result<(), E
 
 async fn handle_client(
     stream: tokio::net::UnixStream,
-    displays: &mut [Context<'_>],
+    displays: &mut [Display<'_>],
 ) -> Result<(), Error> {
     let frames =
         tokio_util::codec::FramedRead::new(stream, tokio_util::codec::LengthDelimitedCodec::new());
@@ -59,11 +79,11 @@ async fn handle_client(
 
     while let Some(payload) = payloads.try_next().await? {
         if let Some(model) = payload.model {
-            let ctx = displays
+            let display = displays
                 .iter_mut()
                 .find(|d| d.di.model() == model)
                 .ok_or(Error::DisplayNotFound)?;
-            handle_client_cmd(ctx, &payload.cmd).await?;
+            handle_client_cmd(display, &payload.cmd).await?;
         } else {
             for display in displays.iter_mut() {
                 handle_client_cmd(display, &payload.cmd).await?;
@@ -105,7 +125,7 @@ async fn main() {
         };
 
         eprintln!("add display dispno={} model={}", di.dispno(), di.model());
-        displays.push(Context {
+        displays.push(Display {
             max_brightness,
             brightness,
             di,
