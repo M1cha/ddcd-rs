@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "ddcutil-sys",
-    "ddcutil",
     "ddcd",
+    "ddcutil",
+    "ddcutil-sys",
 ]

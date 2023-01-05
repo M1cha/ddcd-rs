@@ -5,5 +5,5 @@ authors = ["Michael Zimmermann <sigmaepsilon92@gmail.com>"]
 edition = "2018"
 
 [dependencies]
-ddcutil-sys = { path="../ddcutil-sys" }
+ddcutil-sys = { path = "../ddcutil-sys" }
 thiserror = "^1.0"
