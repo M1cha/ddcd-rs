@@ -1,10 +1,9 @@
 use clap::Parser as _;
-use ddcd::*;
-use futures::prelude::sink::SinkExt;
+use futures::prelude::sink::SinkExt as _;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let payload = SocketPayload::parse();
+    let payload = ddcd::SocketPayload::parse();
 
     let stream = tokio::net::UnixStream::connect("/run/ddcd/socket")
         .await

@@ -1,5 +1,4 @@
-use ddcd::*;
-use futures::stream::TryStreamExt;
+use futures::stream::TryStreamExt as _;
 use std::convert::TryInto as _;
 
 const VCP_INPUT: u8 = 0x60;
@@ -129,11 +128,11 @@ impl<'a> Display<'a> {
     }
 }
 
-async fn handle_client_cmd(display: &mut Display<'_>, cmd: &Command) -> Result<(), Error> {
+async fn handle_client_cmd(display: &mut Display<'_>, cmd: &ddcd::Command) -> Result<(), Error> {
     match cmd {
-        Command::BrightnessUp => display.increase_luminance()?,
-        Command::BrightnessDown => display.decrease_luminance()?,
-        Command::InputSource { id } => display.set_input(*id)?,
+        ddcd::Command::BrightnessUp => display.increase_luminance()?,
+        ddcd::Command::BrightnessDown => display.decrease_luminance()?,
+        ddcd::Command::InputSource { id } => display.set_input(*id)?,
     }
 
     Ok(())
@@ -147,7 +146,7 @@ async fn handle_client(
         tokio_util::codec::FramedRead::new(stream, tokio_util::codec::LengthDelimitedCodec::new());
     let mut payloads = tokio_serde::SymmetricallyFramed::new(
         frames,
-        tokio_serde::formats::SymmetricalBincode::<SocketPayload>::default(),
+        tokio_serde::formats::SymmetricalBincode::<ddcd::SocketPayload>::default(),
     );
 
     while let Some(payload) = payloads.try_next().await? {

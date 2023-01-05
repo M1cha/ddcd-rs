@@ -1,4 +1,4 @@
-use std::convert::TryInto;
+use std::convert::TryInto as _;
 
 use ddcutil_sys::DDCA_Non_Table_Vcp_Value as VcpValue;
 pub const DDCRC_OK: ddcutil_sys::DDCA_Status = ddcutil_sys::DDCRC_OK as ddcutil_sys::DDCA_Status;
