@@ -1,4 +1,4 @@
-use clap::Clap;
+use clap::Parser as _;
 use ddcd::*;
 use futures::prelude::sink::SinkExt;
 
