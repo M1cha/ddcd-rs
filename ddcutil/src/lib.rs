@@ -196,7 +196,7 @@ impl DisplayInfoList {
         }
     }
 
-    pub fn iter(&self) -> DislayInfoListIter {
+    pub fn iter(&self) -> DislayInfoListIter<'_> {
         DislayInfoListIter { list: self, pos: 0 }
     }
 
