@@ -24,6 +24,8 @@ enum Error {
     DisplayNotFound,
 }
 
+#[derive(Clone, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Calibration {
     red: u16,
     green: u16,
@@ -166,8 +168,25 @@ async fn handle_client(
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DisplayConfig {
+    model: String,
+    calibration: Calibration,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Config {
+    #[serde(default)]
+    displays: Vec<DisplayConfig>,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let config = std::fs::read_to_string("/etc/ddcd.toml").expect("failed to read config");
+    let config: Config = toml::from_str(&config).expect("failed to parse config");
+
     let mut listenfd = listenfd::ListenFd::from_env();
     let listener = listenfd
         .take_unix_listener(0)
@@ -194,17 +213,17 @@ async fn main() {
             Ok(dh) => dh,
         };
 
-        let calibration = match di.model() {
-            "DELL P3221D" => Calibration {
-                red: 215,
-                green: 219,
-                blue: 210,
-                max: 219,
-            },
-            model => panic!("unsupported model: {}", model),
-        };
+        let model = di.model();
+        eprintln!("found display dispno={} model={}", di.dispno(), model);
 
-        eprintln!("add display dispno={} model={}", di.dispno(), di.model());
+        let calibration = config
+            .displays
+            .iter()
+            .find(|display| display.model == model)
+            .expect("unsupported model")
+            .calibration
+            .clone();
+
         displays.push(Display {
             brightness: VcpValue::from_display(&mut dh, VCP_BRIGHTNESS).unwrap(),
             gain_red: VcpValue::from_display(&mut dh, VCP_GAIN_RED).unwrap(),
