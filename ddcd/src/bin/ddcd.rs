@@ -94,7 +94,7 @@ impl<'a> Display<'a> {
 
             self.brightness.set(&mut self.dh, new_brightness)?;
         } else {
-            let new_luminance: f32 = (100 - new_luminance.abs()).try_into()?;
+            let new_luminance: f32 = (100 - new_luminance.abs()).into();
 
             let new_gain_red_internal = self.calibration.red as f32 * new_luminance / 100.0;
             let new_gain_green_internal = self.calibration.green as f32 * new_luminance / 100.0;

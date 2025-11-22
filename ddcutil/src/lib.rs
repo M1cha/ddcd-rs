@@ -62,17 +62,13 @@ impl DisplayIdentifier {
             Err(Error::Sys(status))
         } else {
             assert!(!dref.is_null());
-            Ok(DisplayRef {
-                native: dref,
-                owned: true,
-            })
+            Ok(DisplayRef { native: dref })
         }
     }
 }
 
 pub struct DisplayRef {
     native: ddcutil_sys::DDCA_Display_Ref,
-    owned: bool,
 }
 
 impl DisplayRef {
@@ -84,14 +80,6 @@ impl DisplayRef {
         } else {
             assert!(!dh.is_null());
             Ok(DisplayHandle { native: dh })
-        }
-    }
-}
-
-impl Drop for DisplayRef {
-    fn drop(&mut self) {
-        if !self.owned {
-            return;
         }
     }
 }
@@ -247,7 +235,6 @@ impl<'a> DisplayInfo<'a> {
         let native = unsafe { self.native.as_ref() }.unwrap();
         DisplayRef {
             native: native.dref,
-            owned: false,
         }
     }
 
