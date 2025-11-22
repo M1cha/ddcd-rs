@@ -6,6 +6,7 @@ fn main() {
         .header("wrapper.h")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .derive_default(true)
+        .wrap_unsafe_ops(true)
         .generate()
         .expect("Unable to generate bindings");
 
