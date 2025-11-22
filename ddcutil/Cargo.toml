@@ -2,7 +2,7 @@
 name = "ddcutil"
 version = "0.1.0"
 authors = ["Michael Zimmermann <sigmaepsilon92@gmail.com>"]
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 ddcutil-sys = { path = "../ddcutil-sys" }
