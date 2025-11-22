@@ -175,6 +175,12 @@ async fn main() {
         .expect("can't get unix listener");
     let listener = tokio::net::UnixListener::from_std(listener).unwrap();
 
+    ddcutil::init(
+        "",
+        ddcutil::sys::DDCA_Syslog_Level_DDCA_SYSLOG_ERROR,
+        ddcutil::sys::DDCA_Init_Options_DDCA_INIT_OPTIONS_NONE,
+    )
+    .expect("failed to init ddcutil");
     let dil = ddcutil::DisplayInfoList::new(false).expect("can't get display info list");
     let mut displays = Vec::with_capacity(dil.len());
 

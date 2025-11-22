@@ -1,5 +1,6 @@
 use std::convert::TryInto as _;
 
+pub use ddcutil_sys as sys;
 use ddcutil_sys::DDCA_Non_Table_Vcp_Value as VcpValue;
 pub const DDCRC_OK: ddcutil_sys::DDCA_Status = ddcutil_sys::DDCRC_OK as ddcutil_sys::DDCA_Status;
 
@@ -9,6 +10,8 @@ pub enum Error {
     Sys(ddcutil_sys::DDCA_Status),
     #[error(transparent)]
     TryFromIntError(#[from] std::num::TryFromIntError),
+    #[error(transparent)]
+    NulError(#[from] std::ffi::NulError),
 }
 
 pub struct DisplayIdentifier {
@@ -89,11 +92,6 @@ impl Drop for DisplayRef {
     fn drop(&mut self) {
         if !self.owned {
             return;
-        }
-
-        let status = unsafe { ddcutil_sys::ddca_free_display_ref(self.native) };
-        if status != DDCRC_OK {
-            panic!("ddca_free_display_ref failed: {}", status);
         }
     }
 }
@@ -265,5 +263,26 @@ impl<'a> DisplayInfo<'a> {
                 .to_str()
                 .unwrap()
         }
+    }
+}
+
+pub fn init(
+    libopt_opts: &str,
+    syslog_level_arg: ddcutil_sys::DDCA_Syslog_Level,
+    opts: ddcutil_sys::DDCA_Init_Options,
+) -> Result<(), Error> {
+    let libopt_opts = std::ffi::CString::new(libopt_opts)?;
+    let status = unsafe {
+        ddcutil_sys::ddca_init2(
+            libopt_opts.as_ptr(),
+            syslog_level_arg,
+            opts,
+            std::ptr::null_mut(),
+        )
+    };
+    if status != DDCRC_OK {
+        Err(Error::Sys(status))
+    } else {
+        Ok(())
     }
 }
