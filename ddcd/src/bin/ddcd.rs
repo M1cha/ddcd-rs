@@ -172,6 +172,7 @@ async fn handle_client(
 #[serde(deny_unknown_fields)]
 struct DisplayConfig {
     model: String,
+    serial: String,
     calibration: Calibration,
 }
 
@@ -214,13 +215,19 @@ async fn main() {
         };
 
         let model = di.model();
-        eprintln!("found display dispno={} model={}", di.dispno(), model);
+        let serial = di.serial();
+        eprintln!(
+            "found display dispno={} model={} serial={}",
+            di.dispno(),
+            model,
+            serial
+        );
 
         let calibration = config
             .displays
             .iter()
-            .find(|display| display.model == model)
-            .expect("unsupported model")
+            .find(|display| display.model == model && display.serial == serial)
+            .expect("unsupported display")
             .calibration
             .clone();
 

@@ -264,6 +264,15 @@ impl<'a> DisplayInfo<'a> {
                 .unwrap()
         }
     }
+
+    pub fn serial(&self) -> &str {
+        let native = unsafe { self.native.as_ref() }.unwrap();
+        unsafe {
+            std::ffi::CStr::from_ptr(native.sn.as_ptr())
+                .to_str()
+                .unwrap()
+        }
+    }
 }
 
 pub fn init(
